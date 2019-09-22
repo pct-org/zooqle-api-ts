@@ -1,5 +1,6 @@
 import axios from 'axios'
 import * as cheerio from 'cheerio'
+import * as bytes from 'bytes'
 import { URL, parse, Url } from 'url'
 
 interface IsearchResults {
@@ -11,6 +12,8 @@ interface IsearchResults {
   leechers: number
   magnet: string
   hash: string
+  languages: string[]
+  quality: string
 }
 
 interface IsearchResponse {
@@ -129,7 +132,7 @@ class Enums {
 }
 
 class Common {
-  public static async load (url: string): Promise<Iload> {
+  public static async load(url: string): Promise<Iload> {
     // console.log(url)
     const result = await axios.get(url)
 
@@ -139,11 +142,11 @@ class Common {
     }
   }
 
-  public static magnetToHash (magnet: string) {
+  public static magnetToHash(magnet: string) {
     return magnet.match(/:([\w\d]{40})/)[1]
   }
 
-  public static assignUrl (endpoint: string, source: string) {
+  public static assignUrl(endpoint: string, source: string) {
     const url = new URL(endpoint)
     const href = parse(source)
     url.pathname = href.pathname
@@ -151,7 +154,7 @@ class Common {
     return url.href
   }
 
-  public static parseSeeders (seedersStr: string) {
+  public static parseSeeders(seedersStr: string) {
 
     if (seedersStr) {
       const seedersMatch = seedersStr.match(/\d+/g)
@@ -163,7 +166,7 @@ class Common {
     return [0, 0]
   }
 
-  public static iconToType (icon: Cheerio): string {
+  public static iconToType(icon: Cheerio): string {
     switch (true) {
       case icon.hasClass('zqf-movies'):
         return 'movie'
@@ -196,40 +199,53 @@ class Common {
 }
 
 class Parser {
-  public static parseSearch ($: CheerioStatic) {
+  public static parseSearch($: CheerioStatic, categories: string[] = []) {
     let [, search, pageSize, total]: string[] | number[] = $('.panel.zq-panel.zq-small .panel-heading')
       .text().trim().match(/"(.+)"\n{2}.+-\n(\d+)\nof (\d+[,]?\d+)/)
 
     pageSize = parseInt(pageSize, 10)
     total = parseInt(total.replace(',', ''), 10)
 
-    const htmlResults = $('td.text-trunc.text-nowrap a')
+    const htmlResults = $('table > tbody > tr')
     const searchResults: IsearchResults[] = []
     htmlResults.each((i) => {
       const e = htmlResults.eq(i)
+      const a = e.find('td a')
 
-      const progress = e.parent().parent().find('.progress')
-      const magnet = e.parent().parent().find('.spr.dl-magnet')
-      .first().parent().attr('href')
+      const title = a.text()
+      const progress = e.find('.progress')
+      const magnet = e.find('.spr.dl-magnet')
+        .first().parent().attr('href')
 
       const size = progress.eq(0).text()
 
       const seedersStr = progress.eq(1).attr('title')
       const [seeders, leechers] = Common.parseSeeders(seedersStr)
 
+      const languages = e.find('[title="Detected languages"]').text()
+      const [quality] = title.match(/\d{3,4}p/) || ['Str']
+
       const iconElement = $('.zqf.text-muted2.zqf-small.pad-r2').eq(i)
       const filetype = Common.iconToType(iconElement)
 
-      searchResults.push({
-        filetype,
-        href: e.attr('href'),
-        title: e.text(),
-        size,
-        seeders,
-        leechers,
-        magnet,
-        hash: Common.magnetToHash(magnet)
-      })
+      // Only add it if it's a allowed category
+      if (categories.length === 0 || categories.indexOf(filetype) > -1) {
+        if (categories.length === 0 || categories.indexOf('XXX') !== -1 || title.indexOf('XXX') === -1) {
+          // XXX is not in the categories so if the title contains it don't add it
+          searchResults.push({
+            filetype,
+            href: a.attr('href'),
+            title,
+            languages: languages.split(','),
+            quality,
+            size: bytes(size),
+            seeders,
+            leechers,
+            magnet,
+            hash: Common.magnetToHash(magnet)
+          })
+        }
+      }
     })
 
     const searchResponse: IsearchResponse = {
@@ -247,7 +263,7 @@ class Parser {
     return response
   }
 
-  public static parseShow ($: CheerioStatic, loadData?: boolean) {
+  public static parseShow($: CheerioStatic, loadData?: boolean) {
     const title = $('td.h4.sh1').text()
     const [from, to] = $('.sh2 i').text().split('→').map(x => x.trim())
     const summary = $('td.small.text-muted.sh2').text()
@@ -302,7 +318,7 @@ class Parser {
     return response
   }
 
-  public static parseMovie ($: CheerioStatic) {
+  public static parseMovie($: CheerioStatic) {
     const moviesElement = $('td.text-nowrap.text-trunc')
 
     const title = $('h4.margin-top-10').text().trim()
@@ -353,7 +369,7 @@ class Parser {
     return response
   }
 
-  public static parseData ($: CheerioStatic) {
+  public static parseData($: CheerioStatic) {
     const data: Idata[] = []
     const titleLinks = $('td.text-nowrap.text-trunc a')
 
@@ -392,7 +408,7 @@ class Parser {
     return data
   }
 
-  public static parseTorrent ($: CheerioStatic) {
+  public static parseTorrent($: CheerioStatic) {
     const title = $('#torname').text().replace(/ /g, '.')
     const sourceElement = $(':contains("– Indexed from –")').last().next()
     const iconElement = $('.tor-icon')
@@ -401,7 +417,9 @@ class Parser {
     const [imdbId] = imdb.match(/\btt\d{7}\b/) || [null]
 
     let source = sourceElement.text().trim()
-    if (source === '') { source = null }
+    if (source === '') {
+      source = null
+    }
 
     const sourceUrl = sourceElement.attr('href') || null
 
@@ -430,7 +448,10 @@ class Parser {
 }
 
 export class Zooqle {
-  constructor () {
+
+  lastRequest = null
+
+  constructor() {
     this._assignUrl = Common.assignUrl.bind(null, this.endPoint)
   }
 
@@ -439,65 +460,82 @@ export class Zooqle {
 
   public enums = new Enums()
 
-  public get endPoint () {
+  public get endPoint() {
     return this._endpoint.href
   }
 
-  public set endPoint (url: string) {
+  public set endPoint(url: string) {
     this._endpoint.host = url
   }
 
-  public async search (query: string, parameters: string[] = []) {
+  public async search(query: string, parameters: string[] = [], categories: string[] = []) {
     return new Promise<Iresponse>((resolve, reject) => {
-      const url = this._endpoint
-      url.pathname = '/search'
-      url.searchParams.append('q', query)
+      const thisRequest = Date.now()
+      let timeout = 0
 
-      parameters.forEach(param => {
-        const [key, val] = param.split('=')
-        url.searchParams.append(key, val)
-      })
+      if (!this.lastRequest) {
+        this.lastRequest = Date.now()
+      }
 
-      Common.load(url.href)
-        .then(res => {
-          switch (true) {
-            case /\/tv\//.test(res.url):
-              return resolve(Parser.parseShow(res.$)) // handle tv
-            case /\/movie\//.test(res.url):
-              return resolve(Parser.parseMovie(res.$)) // handle movie
-            case /\/search/.test(res.url):
-              return resolve(Parser.parseSearch(res.$)) // handle search
-            default:
-              const torrentResponse = Parser.parseTorrent(res.$) // handle direct torrent
-              const response: Iresponse = {
-                type: 'torrent',
-                torrentResponse
-              }
+      if ((this.lastRequest + 1000) > thisRequest) {
+        timeout = (this.lastRequest + 1100) - thisRequest
+      }
 
-              return resolve(response)
-          }
+      // There is a 1 req a sec rate limit, let's not hit it
+      setTimeout(() => {
+        const url = this._endpoint
+        url.pathname = '/search'
+        url.searchParams.append('q', query)
+
+        parameters.forEach(param => {
+          const [key, val] = param.split('=')
+          url.searchParams.append(key, val)
         })
-        .catch(reject)
+
+        Common.load(url.href)
+          .then(res => {
+            this.lastRequest = Date.now()
+
+            switch (true) {
+              case /\/tv\//.test(res.url):
+                return resolve(Parser.parseShow(res.$)) // handle tv
+              case /\/movie\//.test(res.url):
+                return resolve(Parser.parseMovie(res.$)) // handle movie
+              case /\/search/.test(res.url):
+                return resolve(Parser.parseSearch(res.$, categories)) // handle search
+              default:
+                const torrentResponse = Parser.parseTorrent(res.$) // handle direct torrent
+                const response: Iresponse = {
+                  type: 'torrent',
+                  torrentResponse
+                }
+
+                return resolve(response)
+            }
+          })
+          .catch(reject)
+
+      }, timeout)
     })
   }
 
-  public async getData (dataHref: string) {
+  public async getData(dataHref: string) {
     return new Promise<Idata[]>((resolve, reject) => {
       const url = this._assignUrl(dataHref)
       Common.load(url).then(res => {
         resolve(Parser.parseData(res.$))
       })
-      .catch(console.error)
+        .catch(console.error)
     })
   }
 
-  public async getTorrentData (torrentHref: string) {
+  public async getTorrentData(torrentHref: string) {
     return new Promise<Itorrent>((resolve, reject) => {
       const url = this._assignUrl(torrentHref)
       Common.load(url).then(res => {
         resolve(Parser.parseTorrent(res.$))
       })
-      .catch(console.error)
+        .catch(console.error)
     })
   }
 }
