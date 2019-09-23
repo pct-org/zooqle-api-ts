@@ -133,7 +133,6 @@ class Enums {
 
 class Common {
   public static async load(url: string): Promise<Iload> {
-    // console.log(url)
     const result = await axios.get(url)
 
     return {
@@ -230,7 +229,11 @@ class Parser {
 
       // Only add it if it's a allowed category
       if (categories.length === 0 || categories.indexOf(filetype) > -1) {
-        if (categories.length === 0 || categories.indexOf('XXX') !== -1 || title.indexOf('XXX') === -1) {
+        if (categories.length === 0
+          || categories.indexOf('XXX') !== -1
+          || title.indexOf('XXX') === -1
+          || title.toLowerCase().indexOf('porn') === -1
+        ) {
           // XXX is not in the categories so if the title contains it don't add it
           searchResults.push({
             filetype,
@@ -483,7 +486,7 @@ export class Zooqle {
 
       // There is a 1 req a sec rate limit, let's not hit it
       setTimeout(() => {
-        const url = this._endpoint
+        const url = new URL('https://zooqle.com')
         url.pathname = '/search'
         url.searchParams.append('q', query)
 

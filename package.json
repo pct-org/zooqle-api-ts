@@ -1,6 +1,6 @@
 {
   "name": "@pct-org/zooqle",
-  "version": "1.0.46",
+  "version": "1.0.47",
   "description": "Promise based Zooqle Torrent Scraper written in TypeScript.",
   "keywords": [
     "zooqle",
