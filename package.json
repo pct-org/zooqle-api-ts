@@ -1,6 +1,6 @@
 {
   "name": "@pct-org/zooqle",
-  "version": "1.0.47",
+  "version": "1.0.49",
   "description": "Promise based Zooqle Torrent Scraper written in TypeScript.",
   "keywords": [
     "zooqle",
@@ -30,6 +30,7 @@
   "scripts": {
     "build": "rimraf dist && tsc -p tsconfig.build.json",
     "build:watch": "yarn build --watch",
+    "prepublish": "yarn build",
     "test": "mocha ./dist/test",
     "debug": "node --inspect-brk ./dist/debug"
   },
